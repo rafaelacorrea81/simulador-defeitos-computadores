@@ -23,6 +23,18 @@
     <p class="subtitle">No estilo do clássico simulador da Intel: leia o sintoma, formule suas perguntas de investigação e aponte a causa antes de revelar o diagnóstico.</p>
   </header>
 
+  <div class="panel" id="save-panel">
+    <p class="panel-title">Identificação e salvamento</p>
+    <div class="field">
+      <label for="aluno-nome">Nome completo</label>
+      <input type="text" id="aluno-nome" placeholder="Digite seu nome completo" autocomplete="off">
+    </div>
+    <div class="actions">
+      <button type="button" class="btn-reveal" id="btn-salvar">Salvar minhas respostas</button>
+    </div>
+    <p class="reveal-hint" id="save-status">Preencha seu nome e clique em "Salvar" quando terminar (pode salvar mais de uma vez durante a aula — isso baixa um arquivo e também envia para a planilha do professor, se configurada).</p>
+  </div>
+
   <div class="a11y-bar" role="group" aria-label="Opções de acessibilidade">
     <div class="a11y-group">
       <span class="label">Tamanho do texto:</span>
@@ -137,6 +149,16 @@
   "use strict";
 
   var CASES = window.CASES;
+
+  /* ---------- Configuração do envio automático para planilha ----------
+     Cole aqui a URL do seu Web App do Google Apps Script (veja o guia
+     de configuração). Deixe como "" para desativar o envio automático
+     — nesse caso, o botão "Salvar" só baixa o arquivo .csv local. */
+  var SHEETS_ENDPOINT = "https://script.google.com/macros/s/AKfycbyPwA4ttqtXBcEEkI7j7ul-1_rjG7FV3NtYaqE9pAihOJlC5jhr2pawsW5RvYwa3q1w/exec";
+  /* Token opcional (combine o mesmo valor no Apps Script) — dificulta
+     que alguém fora da turma envie linhas falsas para a planilha.
+     Deixe "" em ambos os lados para não usar. */
+  var SHEETS_TOKEN = "";
 
   var state = CASES.map(function(){
     return { status: "pending", q1:"", q2:"", q3:"", peca:"", hintOpen:false, solutionOpen:false };
@@ -374,6 +396,93 @@
   /* ---------- Acessibilidade: alto contraste ---------- */
   els.contrastMode.addEventListener("change", function(e){
     document.body.classList.toggle("alto-contraste", e.target.checked);
+  });
+
+  /* ---------- Salvar respostas (CSV local + planilha) ---------- */
+  var elAlunoNome = document.getElementById("aluno-nome");
+  var elBtnSalvar = document.getElementById("btn-salvar");
+  var elSaveStatus = document.getElementById("save-status");
+
+  function csvEscape(v){
+    v = (v === undefined || v === null) ? "" : String(v);
+    if (/[",\n]/.test(v)){
+      v = '"' + v.replace(/"/g, '""') + '"';
+    }
+    return v;
+  }
+
+  function statusLabel(s){
+    if (s === "solved") return "Resolvido";
+    if (s === "hint") return "Em análise (com dica)";
+    return "Não iniciado";
+  }
+
+  function buildRows(alunoNome, timestamp){
+    var header = ["Timestamp","Aluno","Codigo","Nivel","Categoria","Pergunta1","Pergunta2","Pergunta3","PecaApontada","Status"];
+    var rows = [header];
+    var payloadCasos = [];
+    CASES.forEach(function(c, i){
+      var s = state[i];
+      var row = [timestamp, alunoNome, c.codigo, c.nivelLabel, c.categoria, s.q1, s.q2, s.q3, s.peca, statusLabel(s.status)];
+      rows.push(row);
+      payloadCasos.push({
+        codigo: c.codigo, nivel: c.nivelLabel, categoria: c.categoria,
+        pergunta1: s.q1, pergunta2: s.q2, pergunta3: s.q3, peca: s.peca,
+        status: statusLabel(s.status)
+      });
+    });
+    return { csvRows: rows, payloadCasos: payloadCasos };
+  }
+
+  function downloadCSV(rows, alunoNome){
+    var csv = rows.map(function(r){ return r.map(csvEscape).join(","); }).join("\r\n");
+    var blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+    var url = URL.createObjectURL(blob);
+    var slug = alunoNome.toLowerCase()
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    var hoje = new Date().toISOString().slice(0,10);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "respostas_" + (slug || "aluno") + "_" + hoje + ".csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+  }
+
+  function enviarParaPlanilha(alunoNome, timestamp, payloadCasos){
+    if (!SHEETS_ENDPOINT) return;
+    var payload = { aluno: alunoNome, timestamp: timestamp, token: SHEETS_TOKEN, casos: payloadCasos };
+    fetch(SHEETS_ENDPOINT, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload)
+    }).catch(function(){
+      /* modo no-cors não permite ler a resposta nem confirmar entrega;
+         o próprio catch só cobre falhas de rede antes mesmo do envio */
+    });
+  }
+
+  elBtnSalvar.addEventListener("click", function(){
+    saveInputs();
+    var nome = elAlunoNome.value.trim();
+    if (!nome){
+      elSaveStatus.textContent = "Digite seu nome completo antes de salvar.";
+      elSaveStatus.classList.remove("ok");
+      elAlunoNome.focus();
+      return;
+    }
+    var timestamp = new Date().toLocaleString("pt-BR");
+    var built = buildRows(nome, timestamp);
+    downloadCSV(built.csvRows, nome);
+    enviarParaPlanilha(nome, timestamp, built.payloadCasos);
+    elSaveStatus.textContent = SHEETS_ENDPOINT
+      ? "Arquivo baixado e enviado para a planilha às " + timestamp + "."
+      : "Arquivo baixado às " + timestamp + ". (Envio automático para planilha não está configurado nesta página.)";
+    elSaveStatus.classList.add("ok");
+    announce("Respostas salvas.");
   });
 
   buildDots();
