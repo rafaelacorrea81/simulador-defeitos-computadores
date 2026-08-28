@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Modo Professor — Diagnóstico de Defeitos</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+
+<!-- Portão de acesso: só entra quem souber a senha combinada com o professor.
+     Isto NÃO é segurança real (o código roda no navegador do usuário),
+     apenas uma barreira simples contra acesso casual de alunos.
+     Para trocar a senha, edite a constante SENHA no <script> abaixo. -->
+<div class="gate-overlay" id="gate">
+  <div class="gate-card">
+    <div class="eyebrow">Acesso restrito</div>
+    <h2>Modo Professor</h2>
+    <p>Esta página contém o gabarito completo dos 20 casos. Digite a senha combinada para continuar.</p>
+    <form id="gate-form" autocomplete="off">
+      <input type="password" id="gate-password" placeholder="Senha" aria-label="Senha do professor">
+      <button type="submit" class="btn-reveal">Entrar</button>
+      <p class="gate-error" id="gate-error" role="alert"></p>
+    </form>
+  </div>
+</div>
+
+<div class="wrap app-hidden" id="app">
+
+  <header>
+    <div class="eyebrow">Laboratório de Manutenção de Computadores</div>
+    <h1>Diagnóstico de Defeitos</h1>
+    <p class="subtitle">Modo professor: use para conduzir a discussão em projeção, revelando o gabarito de cada caso após ouvir as hipóteses da turma.</p>
+  </header>
+
+  <div class="teacher-banner">Modo professor — não compartilhe esta página com os alunos</div>
+
+  <details class="plan-panel">
+    <summary>Sugestão de distribuição para uma aula de 4h (20 casos)</summary>
+    <table>
+      <thead>
+        <tr><th>Bloco</th><th>Duração</th><th>Conteúdo</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>50 min</td><td>Casos 1–8 (nível básico) — ritmo rápido, fixar método</td></tr>
+        <tr><td>Intervalo</td><td>10 min</td><td>—</td></tr>
+        <tr><td>2</td><td>50 min</td><td>Casos 9–14 (intermediário) — mais tempo de discussão por caso</td></tr>
+        <tr><td>Intervalo</td><td>15–20 min</td><td>—</td></tr>
+        <tr><td>3</td><td>50 min</td><td>Casos 15–20 (avançado / rede / software / segurança)</td></tr>
+        <tr><td>4</td><td>até 30 min</td><td>Revisão livre: repetir casos em que a turma teve mais dificuldade</td></tr>
+      </tbody>
+    </table>
+  </details>
+
+  <div class="toolbar">
+    <div class="case-counter">CASO <b id="case-index">1</b> / <span id="case-total">20</span></div>
+    <div class="dots" id="dots" role="group" aria-label="Navegar entre os casos"></div>
+  </div>
+
+  <main>
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="tag-group">
+          <span class="code-tag" id="code-tag">HW-PWR</span>
+          <span class="level-tag" id="level-tag">Nível: Básico</span>
+        </div>
+      </div>
+      <div class="terminal-body">
+        <p class="prompt-line"><span class="marker">&gt;</span> SINTOMA RELATADO</p>
+        <p class="sintoma-text" id="sintoma-text">Carregando…</p>
+        <div class="conceito">
+          <b>Conceito envolvido</b>
+          <span id="conceito-text"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <p class="panel-title">Perguntas de apoio (caso a turma trave)</p>
+      <ul id="hint-list" style="margin:0; padding-left:20px; font-size:0.9rem;"></ul>
+      <div class="actions">
+        <button type="button" class="btn-reveal" id="btn-reveal">Mostrar gabarito</button>
+        <button type="button" class="btn-ghost" id="btn-hide">Ocultar gabarito</button>
+      </div>
+    </div>
+
+    <div class="reveal solution-panel" id="solution-panel">
+      <div class="pad">
+        <p class="panel-title">Gabarito</p>
+        <div class="kv">
+          <div class="k">Pista</div>
+          <div class="v" id="sol-pista"></div>
+        </div>
+        <div class="kv">
+          <div class="k">Solução esperada</div>
+          <div class="v" id="sol-resolucao"></div>
+        </div>
+        <div class="kv">
+          <div class="k">Por que acontece</div>
+          <div class="v" id="sol-porque"></div>
+        </div>
+        <div class="kv armadilha">
+          <div class="k">Armadilha comum</div>
+          <div class="v" id="sol-armadilha"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="nav">
+      <button type="button" class="btn-ghost" id="btn-prev">&larr; Caso anterior</button>
+      <button type="button" class="btn-ghost next" id="btn-next">Próximo caso &rarr;</button>
+    </div>
+  </main>
+
+  <footer>MODO PROFESSOR · esta página não é linkada a partir do site do aluno</footer>
+
+</div>
+
+<script src="casos.js"></script>
+<script>
+(function(){
+  "use strict";
+
+  /* Troque a senha aqui. Combine com a turma/coordenação apenas por fora do site. */
+  var SENHA = "@redes_IMMC2026";
+
+  var gate = document.getElementById("gate");
+  var app = document.getElementById("app");
+  var form = document.getElementById("gate-form");
+  var passwordInput = document.getElementById("gate-password");
+  var gateError = document.getElementById("gate-error");
+
+  form.addEventListener("submit", function(e){
+    e.preventDefault();
+    if (passwordInput.value === SENHA){
+      gate.style.display = "none";
+      app.classList.remove("app-hidden");
+      initApp();
+    } else {
+      gateError.textContent = "Senha incorreta. Tente novamente.";
+      passwordInput.value = "";
+      passwordInput.focus();
+    }
+  });
+
+  function initApp(){
+    var CASES = window.CASES;
+    var current = 0;
+    var solutionOpen = [];
+    CASES.forEach(function(){ solutionOpen.push(false); });
+
+    var els = {
+      caseIndex: document.getElementById("case-index"),
+      caseTotal: document.getElementById("case-total"),
+      dots: document.getElementById("dots"),
+      codeTag: document.getElementById("code-tag"),
+      levelTag: document.getElementById("level-tag"),
+      sintomaText: document.getElementById("sintoma-text"),
+      conceitoText: document.getElementById("conceito-text"),
+      hintList: document.getElementById("hint-list"),
+      btnReveal: document.getElementById("btn-reveal"),
+      btnHide: document.getElementById("btn-hide"),
+      solutionPanel: document.getElementById("solution-panel"),
+      solPista: document.getElementById("sol-pista"),
+      solResolucao: document.getElementById("sol-resolucao"),
+      solPorque: document.getElementById("sol-porque"),
+      solArmadilha: document.getElementById("sol-armadilha"),
+      btnPrev: document.getElementById("btn-prev"),
+      btnNext: document.getElementById("btn-next")
+    };
+
+    function buildDots(){
+      els.dots.innerHTML = "";
+      CASES.forEach(function(c, i){
+        var b = document.createElement("button");
+        b.type = "button";
+        b.className = "dot";
+        b.textContent = String(i + 1);
+        b.setAttribute("aria-label", "Ir para o caso " + (i + 1));
+        b.addEventListener("click", function(){ goTo(i); });
+        els.dots.appendChild(b);
+      });
+    }
+
+    function refreshDots(){
+      var buttons = els.dots.querySelectorAll(".dot");
+      buttons.forEach(function(b, i){
+        b.classList.toggle("current", i === current);
+        b.classList.toggle("solved", solutionOpen[i]);
+      });
+    }
+
+    function render(){
+      var c = CASES[current];
+      els.caseIndex.textContent = current + 1;
+      els.caseTotal.textContent = CASES.length;
+      els.codeTag.textContent = c.codigo;
+      els.levelTag.textContent = "Nível: " + c.nivelLabel;
+      els.levelTag.className = "level-tag level-" + c.nivel;
+      els.sintomaText.textContent = c.sintoma;
+      els.conceitoText.textContent = c.conceito;
+
+      els.hintList.innerHTML = "";
+      c.dicas.forEach(function(d){
+        var li = document.createElement("li");
+        li.textContent = d;
+        els.hintList.appendChild(li);
+      });
+
+      els.solPista.textContent = c.pista;
+      els.solResolucao.textContent = c.resolucao;
+      els.solPorque.textContent = c.porque;
+      els.solArmadilha.textContent = c.armadilha;
+
+      els.solutionPanel.classList.toggle("show", solutionOpen[current]);
+
+      refreshDots();
+      els.btnPrev.disabled = current === 0;
+      els.btnNext.disabled = current === CASES.length - 1;
+    }
+
+    function goTo(i){
+      current = Math.max(0, Math.min(CASES.length - 1, i));
+      render();
+    }
+
+    els.btnReveal.addEventListener("click", function(){
+      solutionOpen[current] = true;
+      render();
+    });
+    els.btnHide.addEventListener("click", function(){
+      solutionOpen[current] = false;
+      render();
+    });
+    els.btnPrev.addEventListener("click", function(){ goTo(current - 1); });
+    els.btnNext.addEventListener("click", function(){ goTo(current + 1); });
+
+    document.addEventListener("keydown", function(e){
+      if (e.key === "ArrowRight") goTo(current + 1);
+      if (e.key === "ArrowLeft") goTo(current - 1);
+    });
+
+    buildDots();
+    render();
+  }
+})();
+</script>
+
+</body>
+</html>
